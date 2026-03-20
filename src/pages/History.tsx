@@ -61,7 +61,7 @@ export default function Home() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { username, email } = useAuthStore();
-  const displayName = username ?? email ?? '';
+  const displayName = username || email || '';
 
   // Compute activeTab from URL, fallback to 'projects' if not in URL or invalid
   const activeTab = useMemo(() => {
@@ -154,6 +154,7 @@ export default function Home() {
               value={activeTab}
               orientation="horizontal"
               onValueChange={handleTabChange}
+              className="gap-3"
             >
               <MenuToggleItem
                 size="xs"
