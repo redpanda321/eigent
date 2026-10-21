@@ -316,7 +316,14 @@ export async function startBackend(
     }
   }
 
-  const serverUrl = resolvedServerUrl || DEFAULT_SERVER_URL;
+  // Vite replaces this value in the packaged main process. A build can thus
+  // target a staging server without relying on the user's shell environment.
+  // Keep the runtime overrides above for local development and diagnostics.
+  const builtServerUrl = import.meta.env.VITE_EIGENT_SERVER_URL;
+  const serverUrl = resolvedServerUrl || builtServerUrl || DEFAULT_SERVER_URL;
+  if (!resolvedServerUrl && builtServerUrl) {
+    resolvedSource = 'build-time VITE_EIGENT_SERVER_URL';
+  }
   log.info(
     `Backend SERVER_URL resolved to: ${serverUrl} (source: ${resolvedSource})`
   );
