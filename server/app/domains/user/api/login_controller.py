@@ -19,8 +19,9 @@ import time
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi_babel import _
 from loguru import logger
-from pydantic import BaseModel
-from sqlmodel import Session
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, func, select
 
 from app.core import code
 from app.core.database import session
@@ -30,10 +31,114 @@ from app.model.user.user import LoginByPasswordIn, LoginResponse, Status, User
 from app.shared.auth import create_access_token, create_refresh_token
 from app.shared.auth.token_blacklist import blacklist_token
 from app.shared.auth.user_auth import decode_refresh_token
+from app.shared.auth.user_auth import V1UserAuth, auth_must
+from app.domains.user.service.clerk_session import (
+    ClerkHandoffUnavailable,
+    ClerkEmailUnavailable,
+    ClerkNotConfigured,
+    ClerkProfileUnavailable,
+    ClerkSessionInvalid,
+    redeemed_subject,
+    verified_primary_email,
+    verified_subject,
+)
 from app.shared.exception import TokenException, UserException
 from app.shared.middleware.rate_limit import login_rate_limiter
 
 router = APIRouter(prefix="/user", tags=["V1 Login"])
+
+
+class ClerkSessionIn(BaseModel):
+    session_token: str = Field(min_length=1, max_length=8192)
+
+
+class ClerkHandoffIn(BaseModel):
+    code: str = Field(min_length=22, max_length=128)
+    verifier: str = Field(min_length=43, max_length=128)
+
+
+def _resolve_clerk(call, *args) -> str:
+    try:
+        return call(*args)
+    except ClerkNotConfigured:
+        raise HTTPException(status_code=503, detail="Clerk login is not configured") from None
+    except ClerkHandoffUnavailable:
+        raise HTTPException(status_code=503, detail="Clerk handoff is unavailable") from None
+    except ClerkProfileUnavailable:
+        raise HTTPException(status_code=503, detail="Clerk user lookup is unavailable") from None
+    except ClerkEmailUnavailable:
+        raise HTTPException(status_code=403, detail="A verified Clerk email is required") from None
+    except ClerkSessionInvalid:
+        raise HTTPException(status_code=401, detail="Invalid Clerk session") from None
+
+
+def _clerk_subject(token: str) -> str:
+    return _resolve_clerk(verified_subject, token)
+
+
+def _link_clerk_subject(subject: str, db_session: Session, auth: V1UserAuth) -> dict:
+    user = auth.user
+    if user.status == Status.Block or user.deleted_at is not None:
+        raise HTTPException(status_code=403, detail="Account is unavailable")
+    if user.clerk_id not in (None, subject):
+        raise HTTPException(status_code=409, detail="Account is already linked to another Clerk user")
+    linked = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+    if linked is not None and linked.id != user.id:
+        raise HTTPException(status_code=409, detail="Clerk user is already linked to another account")
+    if user.clerk_id is None:
+        user.clerk_id = subject
+        db_session.add(user)
+        try:
+            db_session.commit()
+        except IntegrityError:
+            db_session.rollback()
+            raise HTTPException(status_code=409, detail="Clerk user is already linked") from None
+    return {"linked": True, "user_id": user.id}
+
+
+def _login_clerk_subject(subject: str, db_session: Session) -> LoginResponse:
+    user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+    if user is None:
+        email = _resolve_clerk(verified_primary_email, subject)
+        if db_session.exec(select(User).where(func.lower(User.email) == email.lower())).first():
+            raise HTTPException(status_code=409, detail="Existing Eigent account must be linked first")
+        user = User(email=email, clerk_id=subject)
+        db_session.add(user)
+        try:
+            db_session.commit()
+            db_session.refresh(user)
+        except IntegrityError:
+            db_session.rollback()
+            user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+            if user is None:
+                raise HTTPException(status_code=409, detail="Existing Eigent account must be linked first") from None
+    if user.status == Status.Block or user.deleted_at is not None:
+        raise HTTPException(status_code=403, detail="Clerk account is unavailable")
+    return LoginResponse(token=create_access_token(user.id), email=user.email, user_id=user.id)
+
+
+@router.post("/clerk/link", name="link Clerk sign-in to current account", dependencies=[login_rate_limiter])
+def link_clerk_account(data: ClerkSessionIn, db_session: Session = Depends(session),
+                       auth: V1UserAuth = Depends(auth_must)) -> dict:
+    """Require both the existing Eigent session and a Clerk session to link."""
+    return _link_clerk_subject(_clerk_subject(data.session_token), db_session, auth)
+
+
+@router.post("/clerk/login", name="login with linked Clerk session", dependencies=[login_rate_limiter])
+def login_with_clerk(data: ClerkSessionIn, db_session: Session = Depends(session)) -> LoginResponse:
+    """Issue the existing Eigent token for an explicitly linked Clerk user."""
+    return _login_clerk_subject(_clerk_subject(data.session_token), db_session)
+
+
+@router.post("/clerk/redeem-link", name="link account with Clerk handoff", dependencies=[login_rate_limiter])
+def link_clerk_handoff(data: ClerkHandoffIn, db_session: Session = Depends(session),
+                       auth: V1UserAuth = Depends(auth_must)) -> dict:
+    return _link_clerk_subject(_resolve_clerk(redeemed_subject, data.code, data.verifier), db_session, auth)
+
+
+@router.post("/clerk/redeem-login", name="login with Clerk handoff", dependencies=[login_rate_limiter])
+def login_clerk_handoff(data: ClerkHandoffIn, db_session: Session = Depends(session)) -> LoginResponse:
+    return _login_clerk_subject(_resolve_clerk(redeemed_subject, data.code, data.verifier), db_session)
 
 
 @router.post("/dev_login", name="dev login (Swagger only)", include_in_schema=True)
@@ -88,12 +193,12 @@ class RefreshTokenIn(BaseModel):
 async def by_password(data: LoginByPasswordIn, db_session: Session = Depends(session)) -> dict:
     """User login with email and password. Returns access_token (1h) and refresh_token (30d)."""
     user = User.by(User.email == data.email, s=db_session).one_or_none()
-    if not user or not password_verify(data.password, user.password):
+    if not user or not user.password or not password_verify(data.password, user.password):
         raise UserException(code.password, _("Account or password error"))
     if user.status == Status.Block:
         raise UserException(code.error, _("Your account has been blocked."))
-    if not user.is_active:
-        raise UserException(code.error, _("Please activate your account via the email link."))
+    if user.deleted_at is not None:
+        raise UserException(code.error, _("Account is unavailable."))
 
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
@@ -116,8 +221,8 @@ async def refresh(data: RefreshTokenIn, db_session: Session = Depends(session)) 
         raise TokenException(code.token_invalid, _("User not found"))
     if user.status == Status.Block:
         raise UserException(code.error, _("Your account has been blocked."))
-    if not user.is_active:
-        raise UserException(code.error, _("Please activate your account via the email link."))
+    if user.deleted_at is not None:
+        raise UserException(code.error, _("Account is unavailable."))
     if jti:
         ttl = max(0, exp_ts - int(time.time()))
         await blacklist_token(jti, ttl)

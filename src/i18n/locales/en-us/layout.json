@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "Continue with myworld.ai",
+  "clerk-account-not-linked": "Connect your existing Eigent account in Settings first.",
   "report-bug": "Report a bug",
   "report-bug-dialog-title": "Report a bug",
   "report-bug-footer-hint": "We will save a ZIP of app logs, then open your email app. Attach the saved ZIP to the message before sending.",

@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "myworld.ai로 계속",
+  "clerk-account-not-linked": "먼저 설정에서 기존 Eigent 계정을 연결하세요.",
   "report-bug": "버그 신고",
   "report-bug-dialog-title": "버그 신고",
   "report-bug-footer-hint": "앱 로그를 ZIP으로 저장한 후 이메일 앱을 엽니다. 보내기 전에 저장된 ZIP을 메시지에 첨부하세요.",

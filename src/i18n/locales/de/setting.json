@@ -1,4 +1,6 @@
 {
+  "connect-myworld": "myworld.ai verbinden",
+  "clerk-connected": "myworld.ai-Konto verbunden",
   "model-list": {
     "all-providers": "Alle Modellanbieter",
     "default-model": "Standardmodell",

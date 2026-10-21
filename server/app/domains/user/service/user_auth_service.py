@@ -52,7 +52,7 @@ class UserAuthService:
             return AuthResult(success=False, error_code="AUTH_INVALID_CREDENTIALS")
         if user.status == Status.Block:
             return AuthResult(success=False, error_code="AUTH_ACCOUNT_BLOCKED")
-        if not user.is_active:
+        if user.deleted_at is not None:
             return AuthResult(success=False, error_code="AUTH_ACCOUNT_INACTIVE")
 
         # No credits refresh in eigent (no billing domain)
@@ -83,7 +83,7 @@ class UserAuthService:
             return AuthResult(success=False, error_code="AUTH_USER_NOT_FOUND")
         if user.status == Status.Block:
             return AuthResult(success=False, error_code="AUTH_ACCOUNT_BLOCKED")
-        if not user.is_active:
+        if user.deleted_at is not None:
             return AuthResult(success=False, error_code="AUTH_ACCOUNT_INACTIVE")
 
         # Blacklist old refresh token

@@ -1,4 +1,6 @@
 {
+  "connect-myworld": "myworld.ai を連携",
+  "clerk-connected": "myworld.ai アカウントを連携しました",
   "model-list": {
     "all-providers": "すべてのモデルプロバイダー",
     "default-model": "デフォルトモデル",

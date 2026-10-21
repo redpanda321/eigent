@@ -865,6 +865,25 @@ async function processProtocolUrl(url: string) {
   if (win && !win.isDestroyed()) {
     log.info('urlObj.pathname', urlObj.pathname);
 
+    if (
+      urlObj.protocol === 'eigent:' &&
+      urlObj.host === 'auth' &&
+      urlObj.pathname === '/clerk'
+    ) {
+      const state = urlObj.searchParams.get('state');
+      if (
+        code &&
+        state &&
+        /^[A-Za-z0-9_-]{22,128}$/.test(code) &&
+        /^[A-Za-z0-9_-]{22,128}$/.test(state)
+      ) {
+        win.webContents.send('clerk-handoff-received', { code, state });
+        win.show();
+        win.focus();
+      }
+      return;
+    }
+
     if (urlObj.pathname === '/oauth') {
       log.info('oauth');
       const provider = urlObj.searchParams.get('provider');
@@ -984,7 +1003,7 @@ const setupSingleInstanceLock = () => {
   // creating a window where a second instance could start. We only need
   // to register the event handlers.
   app.on('second-instance', (event, argv) => {
-    log.info('second-instance', argv);
+    log.info('second-instance', { argumentCount: argv.length });
     const url = argv.find((arg) => arg.startsWith('eigent://'));
     if (url) handleProtocolUrl(url);
     if (win) win.show();

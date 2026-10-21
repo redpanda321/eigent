@@ -17,6 +17,7 @@ import { DsText } from '@/components/ui/ds-text';
 import { Input } from '@/components/ui/input';
 import { LocaleEnum, switchLanguage } from '@/i18n';
 import { SITE_URL } from '@/lib';
+import { clerkHandoffAvailable, startClerkHandoff } from '@/lib/clerkHandoff';
 import {
   isWorkProfileId,
   normalizeWorkProfile,
@@ -234,7 +235,30 @@ export default function SettingGeneral({
               />
             }
             action={
-              <div className="flex items-center gap-sm">
+              <div className="flex flex-wrap items-center gap-sm">
+                {host?.ipcRenderer &&
+                  authStore.user_id &&
+                  clerkHandoffAvailable() && (
+                    <Button
+                      variant="outline"
+                      textWeight="semibold"
+                      buttonContent="text"
+                      buttonRadius="full"
+                      tone="neutral"
+                      size="sm"
+                      onClick={() => {
+                        void startClerkHandoff(
+                          'link',
+                          host.electronAPI.openExternal,
+                          authStore.user_id
+                        ).catch(() =>
+                          toast.error(t('layout.login-failed-please-try-again'))
+                        );
+                      }}
+                    >
+                      {t('setting.connect-myworld')}
+                    </Button>
+                  )}
                 <Button
                   onClick={() => {
                     window.location.href = `${SITE_URL}/dashboard?email=${authStore.email}`;
