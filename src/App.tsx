@@ -14,7 +14,10 @@
 
 import { proxyFetchPost } from '@/api/http';
 import { useHost } from '@/host';
-import { consumeClerkHandoff } from '@/lib/clerkHandoff';
+import {
+  clerkHandoffMatchesAccount,
+  consumeClerkHandoff,
+} from '@/lib/clerkHandoff';
 import { queryClient } from '@/lib/queryClient';
 import AppRoutes from '@/routers/index';
 import { stackClientApp } from '@/stack/client';
@@ -68,11 +71,9 @@ function App() {
     ) => {
       const pending = consumeClerkHandoff(payload.code, payload.state);
       if (!pending) return;
-      const currentToken = useAuthStore.getState().token;
-      if (
-        (pending.mode === 'link' && !currentToken) ||
-        (pending.mode === 'login' && currentToken)
-      ) {
+      const { token: currentToken, user_id: currentUserId } =
+        useAuthStore.getState();
+      if (!clerkHandoffMatchesAccount(pending, currentToken, currentUserId)) {
         toast.error(t('layout.login-failed-please-try-again'));
         return;
       }

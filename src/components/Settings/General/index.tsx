@@ -236,26 +236,29 @@ export default function SettingGeneral({
             }
             action={
               <div className="flex flex-wrap items-center gap-sm">
-                {host?.ipcRenderer && clerkHandoffAvailable() && (
-                  <Button
-                    variant="outline"
-                    textWeight="semibold"
-                    buttonContent="text"
-                    buttonRadius="full"
-                    tone="neutral"
-                    size="sm"
-                    onClick={() => {
-                      void startClerkHandoff(
-                        'link',
-                        host.electronAPI.openExternal
-                      ).catch(() =>
-                        toast.error(t('layout.login-failed-please-try-again'))
-                      );
-                    }}
-                  >
-                    {t('setting.connect-myworld')}
-                  </Button>
-                )}
+                {host?.ipcRenderer &&
+                  authStore.user_id &&
+                  clerkHandoffAvailable() && (
+                    <Button
+                      variant="outline"
+                      textWeight="semibold"
+                      buttonContent="text"
+                      buttonRadius="full"
+                      tone="neutral"
+                      size="sm"
+                      onClick={() => {
+                        void startClerkHandoff(
+                          'link',
+                          host.electronAPI.openExternal,
+                          authStore.user_id
+                        ).catch(() =>
+                          toast.error(t('layout.login-failed-please-try-again'))
+                        );
+                      }}
+                    >
+                      {t('setting.connect-myworld')}
+                    </Button>
+                  )}
                 <Button
                   onClick={() => {
                     window.location.href = `${SITE_URL}/dashboard?email=${authStore.email}`;
