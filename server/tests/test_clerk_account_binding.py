@@ -1,5 +1,6 @@
 """Clerk sign-in may only reach an explicitly linked Eigent account."""
 
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -33,6 +34,13 @@ from app.shared.middleware.cors import get_cors_middleware
 
 ISSUER = "https://clerk.example.test"
 ORIGIN = "https://app.example.test"
+
+
+def test_cloud_auto_login_is_unavailable(monkeypatch):
+    monkeypatch.setenv("debug", "false")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(login_controller.auto_login(db_session=object()))
+    assert exc.value.status_code == 404
 
 
 @pytest.fixture(scope="module")

@@ -152,6 +152,8 @@ async def dev_login(username: str | None = Form(default=None), password: str | N
 @router.post("/auto-login", name="auto login for local mode")
 async def auto_login(db_session: Session = Depends(session)) -> LoginResponse:
     """Auto login for fully local mode. Returns most recently active user or creates default."""
+    if env("debug", "").lower() not in {"on", "true", "1"}:
+        raise HTTPException(status_code=404)
     user = User.by(
         User.status == Status.Normal,
         order_by=User.updated_at.desc(),
