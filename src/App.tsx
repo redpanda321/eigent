@@ -103,7 +103,7 @@ function App() {
         navigate('/', { replace: true });
       } catch (error: any) {
         toast.error(
-          error?.status === 403
+          error?.status === 409
             ? t('layout.clerk-account-not-linked')
             : t('layout.login-failed-please-try-again')
         );

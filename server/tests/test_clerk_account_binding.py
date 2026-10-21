@@ -17,7 +17,8 @@ from sqlmodel import Session, create_engine
 
 from app.domains.user.api import login_controller
 from app.domains.user.service.clerk_session import (
-    ClerkNotConfigured, ClerkSessionInvalid, redeemed_subject, verify_clerk_session,
+    ClerkEmailUnavailable, ClerkNotConfigured, ClerkSessionInvalid,
+    redeemed_subject, verified_primary_email, verify_clerk_session,
 )
 from app.model.user.user import User
 from app.shared.auth.user_auth import V1UserAuth
@@ -97,18 +98,27 @@ def db(tmp_path):
     engine.dispose()
 
 
-def test_clerk_login_requires_explicit_binding(db, monkeypatch):
+def test_clerk_login_creates_new_account_and_reuses_binding(db, monkeypatch):
     monkeypatch.setattr(login_controller, "_clerk_subject", lambda _token: "user_abc123")
+    monkeypatch.setattr(login_controller, "verified_primary_email", lambda _subject: "new@example.com")
+    data = login_controller.ClerkSessionIn(session_token="verified-token")
+    response = login_controller.login_with_clerk(data, db)
+    assert response.email == "new@example.com"
+    assert response.user_id not in (1, 2)
+    assert V1UserAuth.decode_token(response.token).id == response.user_id
+    assert login_controller.login_with_clerk(data, db).user_id == response.user_id
+
+
+def test_matching_legacy_email_requires_explicit_binding(db, monkeypatch):
+    monkeypatch.setattr(login_controller, "_clerk_subject", lambda _token: "user_abc123")
+    monkeypatch.setattr(login_controller, "verified_primary_email", lambda _subject: "One@Example.com")
     data = login_controller.ClerkSessionIn(session_token="verified-token")
     with pytest.raises(HTTPException) as error:
         login_controller.login_with_clerk(data, db)
-    assert error.value.status_code == 403
-
+    assert error.value.status_code == 409
     first = db.get(User, 1)
     login_controller.link_clerk_account(data, db, SimpleNamespace(user=first))
-    response = login_controller.login_with_clerk(data, db)
-    assert response.user_id == 1
-    assert V1UserAuth.decode_token(response.token).id == 1
+    assert login_controller.login_with_clerk(data, db).user_id == 1
 
 
 def test_clerk_link_is_one_to_one_and_cannot_be_reassigned(db, monkeypatch):
@@ -174,3 +184,38 @@ def test_handoff_redeems_code_at_fixed_origin_and_verifies_jwt(key_pair, monkeyp
     assert calls == [("https://robotstaging.hangent.com/api/eigent/redeem", {
         "json": {"code": "a" * 43, "verifier": "b" * 43}, "timeout": 5, "allow_redirects": False,
     })]
+
+
+def test_first_login_uses_clerk_verified_primary_email(monkeypatch):
+    monkeypatch.setenv("EIGENT_CLERK_SECRET_KEY", "sk_test_private")
+    profile = {
+        "id": "user_abc123",
+        "primary_email_address_id": "id_primary",
+        "email_addresses": [
+            {"id": "id_other", "email_address": "other@example.com",
+             "verification": {"status": "verified"}},
+            {"id": "id_primary", "email_address": "primary@example.com",
+             "verification": {"status": "verified"}},
+        ],
+    }
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return profile
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("app.domains.user.service.clerk_session.requests.get", get)
+    assert verified_primary_email("user_abc123") == "primary@example.com"
+    assert calls == [("https://api.clerk.com/v1/users/user_abc123", {
+        "headers": {"Authorization": "Bearer sk_test_private"},
+        "timeout": 5, "allow_redirects": False,
+    })]
+    profile["email_addresses"][1]["verification"]["status"] = "unverified"
+    with pytest.raises(ClerkEmailUnavailable):
+        verified_primary_email("user_abc123")

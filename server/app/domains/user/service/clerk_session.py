@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 import jwt
 import requests
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from app.core.environment import env
 
@@ -25,6 +26,14 @@ class ClerkSessionInvalid(Exception):
 
 
 class ClerkHandoffUnavailable(Exception):
+    pass
+
+
+class ClerkProfileUnavailable(Exception):
+    pass
+
+
+class ClerkEmailUnavailable(Exception):
     pass
 
 
@@ -91,3 +100,37 @@ def redeemed_subject(code: str, verifier: str) -> str:
     except (ValueError, KeyError, TypeError) as exc:
         raise ClerkHandoffUnavailable("invalid Clerk handoff response") from exc
     return verified_subject(token)
+
+
+def verified_primary_email(subject: str) -> str:
+    """Read the verified primary email from Clerk for first-time provisioning."""
+    secret = env("EIGENT_CLERK_SECRET_KEY", "")
+    if not secret:
+        raise ClerkNotConfigured("Clerk user provisioning is not configured")
+    if not re.fullmatch(r"user_[A-Za-z0-9]+", subject):
+        raise ClerkSessionInvalid("invalid Clerk user")
+    try:
+        response = requests.get(
+            f"https://api.clerk.com/v1/users/{subject}",
+            headers={"Authorization": f"Bearer {secret}"},
+            timeout=5, allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise ClerkProfileUnavailable("Clerk user lookup unavailable") from exc
+    if response.status_code != 200:
+        raise ClerkProfileUnavailable("Clerk user lookup failed")
+    try:
+        profile = response.json()
+        if profile["id"] != subject:
+            raise ClerkEmailUnavailable("Clerk user mismatch")
+        primary_id = profile["primary_email_address_id"]
+        primary = next(address for address in profile["email_addresses"]
+                       if address["id"] == primary_id)
+        if primary["verification"]["status"] != "verified":
+            raise ClerkEmailUnavailable("Clerk primary email is unverified")
+        email = str(TypeAdapter(EmailStr).validate_python(primary["email_address"]))
+        if len(email) > 128:
+            raise ClerkEmailUnavailable("Clerk primary email is too long")
+        return email
+    except (KeyError, TypeError, ValueError, StopIteration, ValidationError) as exc:
+        raise ClerkEmailUnavailable("Clerk primary email is unavailable") from exc

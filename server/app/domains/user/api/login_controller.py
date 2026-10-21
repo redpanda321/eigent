@@ -21,7 +21,7 @@ from fastapi_babel import _
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.core import code
 from app.core.database import session
@@ -34,9 +34,12 @@ from app.shared.auth.user_auth import decode_refresh_token
 from app.shared.auth.user_auth import V1UserAuth, auth_must
 from app.domains.user.service.clerk_session import (
     ClerkHandoffUnavailable,
+    ClerkEmailUnavailable,
     ClerkNotConfigured,
+    ClerkProfileUnavailable,
     ClerkSessionInvalid,
     redeemed_subject,
+    verified_primary_email,
     verified_subject,
 )
 from app.shared.exception import TokenException, UserException
@@ -61,6 +64,10 @@ def _resolve_clerk(call, *args) -> str:
         raise HTTPException(status_code=503, detail="Clerk login is not configured") from None
     except ClerkHandoffUnavailable:
         raise HTTPException(status_code=503, detail="Clerk handoff is unavailable") from None
+    except ClerkProfileUnavailable:
+        raise HTTPException(status_code=503, detail="Clerk user lookup is unavailable") from None
+    except ClerkEmailUnavailable:
+        raise HTTPException(status_code=403, detail="A verified Clerk email is required") from None
     except ClerkSessionInvalid:
         raise HTTPException(status_code=401, detail="Invalid Clerk session") from None
 
@@ -91,8 +98,22 @@ def _link_clerk_subject(subject: str, db_session: Session, auth: V1UserAuth) -> 
 
 def _login_clerk_subject(subject: str, db_session: Session) -> LoginResponse:
     user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
-    if user is None or user.status == Status.Block or user.deleted_at is not None:
-        raise HTTPException(status_code=403, detail="Clerk account is not linked or available")
+    if user is None:
+        email = _resolve_clerk(verified_primary_email, subject)
+        if db_session.exec(select(User).where(func.lower(User.email) == email.lower())).first():
+            raise HTTPException(status_code=409, detail="Existing Eigent account must be linked first")
+        user = User(email=email, clerk_id=subject)
+        db_session.add(user)
+        try:
+            db_session.commit()
+            db_session.refresh(user)
+        except IntegrityError:
+            db_session.rollback()
+            user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+            if user is None:
+                raise HTTPException(status_code=409, detail="Existing Eigent account must be linked first") from None
+    if user.status == Status.Block or user.deleted_at is not None:
+        raise HTTPException(status_code=403, detail="Clerk account is unavailable")
     return LoginResponse(token=create_access_token(user.id), email=user.email, user_id=user.id)
 
 
@@ -172,7 +193,7 @@ class RefreshTokenIn(BaseModel):
 async def by_password(data: LoginByPasswordIn, db_session: Session = Depends(session)) -> dict:
     """User login with email and password. Returns access_token (1h) and refresh_token (30d)."""
     user = User.by(User.email == data.email, s=db_session).one_or_none()
-    if not user or not password_verify(data.password, user.password):
+    if not user or not user.password or not password_verify(data.password, user.password):
         raise UserException(code.password, _("Account or password error"))
     if user.status == Status.Block:
         raise UserException(code.error, _("Your account has been blocked."))
