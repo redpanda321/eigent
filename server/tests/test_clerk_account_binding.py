@@ -11,17 +11,25 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
+from starlette.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, create_engine
 
 from app.domains.user.api import login_controller
+from app.core.database import session as database_session
 from app.domains.user.service.clerk_session import (
     ClerkEmailUnavailable, ClerkNotConfigured, ClerkSessionInvalid,
     redeemed_subject, verified_primary_email, verify_clerk_session,
 )
 from app.model.user.user import User
 from app.shared.auth.user_auth import V1UserAuth
+from app.shared.auth import user_auth
+from app.shared.exception import TokenException
+from app.shared.middleware.rate_limit import login_rate_limiter
+from app.shared.middleware.cors import get_cors_middleware
 
 ISSUER = "https://clerk.example.test"
 ORIGIN = "https://app.example.test"
@@ -107,6 +115,63 @@ def test_clerk_login_creates_new_account_and_reuses_binding(db, monkeypatch):
     assert response.user_id not in (1, 2)
     assert V1UserAuth.decode_token(response.token).id == response.user_id
     assert login_controller.login_with_clerk(data, db).user_id == response.user_id
+
+
+def test_clerk_handoff_http_routes_keep_eigent_auth_boundary(db, monkeypatch):
+    async def not_blacklisted(_jti):
+        return False
+
+    monkeypatch.setattr(user_auth, "is_blacklisted", not_blacklisted)
+    monkeypatch.setattr(login_controller, "redeemed_subject", lambda _code, _verifier: "user_abc123")
+
+    def database():
+        with Session(db.get_bind()) as request_db:
+            yield request_db
+
+    app = FastAPI()
+    app.include_router(login_controller.router, prefix="/api/v1")
+    app.dependency_overrides[database_session] = database
+    app.dependency_overrides[login_rate_limiter.dependency] = lambda: None
+
+    @app.exception_handler(TokenException)
+    async def rejected(_request, _exception):
+        return JSONResponse(status_code=401, content={"error": "authentication required"})
+
+    handoff = {"code": "a" * 43, "verifier": "b" * 43}
+    with TestClient(app) as client:
+        assert client.post("/api/v1/user/clerk/redeem-link", json=handoff).status_code == 401
+        token = user_auth.create_access_token(1)
+        response = client.post(
+            "/api/v1/user/clerk/redeem-link", json=handoff,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"linked": True, "user_id": 1}
+        response = client.post("/api/v1/user/clerk/redeem-login", json=handoff)
+        assert response.status_code == 200
+        assert response.json()["user_id"] == 1
+        assert V1UserAuth.decode_token(response.json()["token"]).id == 1
+
+
+def test_packaged_desktop_cors_requires_explicit_null_origin(monkeypatch):
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", "null,https://eigent.example.test")
+    app = FastAPI()
+    app.add_middleware(CORSMiddleware, **get_cors_middleware())
+    with TestClient(app) as client:
+        headers = {
+            "Origin": "null",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,authorization",
+        }
+        response = client.options("/api/v1/user/clerk/redeem-login", headers=headers)
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "null"
+        response = client.options(
+            "/api/v1/user/clerk/redeem-login",
+            headers={**headers, "Origin": "https://other.example.test"},
+        )
+        assert response.status_code == 400
+        assert "access-control-allow-origin" not in response.headers
 
 
 def test_matching_legacy_email_requires_explicit_binding(db, monkeypatch):
