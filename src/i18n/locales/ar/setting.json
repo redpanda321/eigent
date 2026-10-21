@@ -1,4 +1,6 @@
 {
+  "connect-myworld": "ربط myworld.ai",
+  "clerk-connected": "تم ربط حساب myworld.ai",
   "model-list": {
     "all-providers": "جميع مزوّدي النماذج",
     "default-model": "النموذج الافتراضي",

@@ -16,7 +16,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, create_engine
 
 from app.domains.user.api import login_controller
-from app.domains.user.service.clerk_session import ClerkNotConfigured, ClerkSessionInvalid, verify_clerk_session
+from app.domains.user.service.clerk_session import (
+    ClerkNotConfigured, ClerkSessionInvalid, redeemed_subject, verify_clerk_session,
+)
 from app.model.user.user import User
 from app.shared.auth.user_auth import V1UserAuth
 
@@ -146,3 +148,29 @@ def test_database_enforces_unique_clerk_binding(db):
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_handoff_redeems_code_at_fixed_origin_and_verifies_jwt(key_pair, monkeypatch):
+    private, public_pem = key_pair
+    token = clerk_token(private)
+    monkeypatch.setenv("EIGENT_CLERK_HANDOFF_ORIGIN", "https://robotstaging.hangent.com")
+    monkeypatch.setenv("EIGENT_CLERK_ISSUER", ISSUER)
+    monkeypatch.setenv("EIGENT_CLERK_JWT_KEY", public_pem)
+    monkeypatch.setenv("EIGENT_CLERK_ALLOWED_ORIGINS", ORIGIN)
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"session_token": token}
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("app.domains.user.service.clerk_session.requests.post", post)
+    assert redeemed_subject("a" * 43, "b" * 43) == "user_abc123"
+    assert calls == [("https://robotstaging.hangent.com/api/eigent/redeem", {
+        "json": {"code": "a" * 43, "verifier": "b" * 43}, "timeout": 5, "allow_redirects": False,
+    })]

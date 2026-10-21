@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "myworld.ai で続行",
+  "clerk-account-not-linked": "先に設定で既存の Eigent アカウントを連携してください。",
   "report-bug": "バグを報告",
   "report-bug-dialog-title": "バグを報告",
   "report-bug-footer-hint": "アプリのログを ZIP で保存してから、メールアプリを開きます。送信前に、保存した ZIP をメールに添付してください。",

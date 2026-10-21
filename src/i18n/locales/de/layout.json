@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "Mit myworld.ai fortfahren",
+  "clerk-account-not-linked": "Verbinde zuerst dein bestehendes Eigent-Konto in den Einstellungen.",
   "report-bug": "Fehler melden",
   "report-bug-dialog-title": "Buchstellen eine Fehlermeldung melden",
   "report-bug-footer-hint": "Wir speichern einen ZIP-Ordner mit App-Daten, dann öffnen wir Ihre E-Mail-Anwendung. Sie können den gespeicherten ZIP-Ordner beifügen und an das Nachrichtenfeld senden.",

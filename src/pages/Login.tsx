@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { Button } from '@/components/ui/button';
+import { clerkHandoffAvailable, startClerkHandoff } from '@/lib/clerkHandoff';
 import { recordSignInFailed } from '@/lib/events/appEvents';
 import { useAuthStore } from '@/store/authStore';
 import { useStackApp } from '@stackframe/react';
@@ -389,29 +390,53 @@ export default function Login() {
           {t('layout.logging-in')}...
         </p>
       )}
-      <Button
-        onClick={() => {
-          setIsLoading(true);
-          const resolvedCallbackUrl =
-            callbackUrl ||
-            (isDesktopHost
-              ? DESKTOP_LOGIN_CALLBACK_URL
-              : getWebLoginCallbackUrl(window.location.origin));
-          const loginUrl = getExternalLoginUrl(resolvedCallbackUrl);
+      <div className="flex w-full flex-col gap-ds-control-gap">
+        {isDesktopHost && clerkHandoffAvailable() && (
+          <Button
+            onClick={() => {
+              setGeneralError('');
+              void startClerkHandoff(
+                'login',
+                host.electronAPI.openExternal
+              ).catch(() =>
+                setGeneralError(t('layout.login-failed-please-try-again'))
+              );
+            }}
+            size="lg"
+            variant="primary"
+            buttonRadius="full"
+            className="w-full"
+          >
+            <span className="flex-1">{t('layout.sign-in-with-myworld')}</span>
+          </Button>
+        )}
+        <Button
+          onClick={() => {
+            setIsLoading(true);
+            const resolvedCallbackUrl =
+              callbackUrl ||
+              (isDesktopHost
+                ? DESKTOP_LOGIN_CALLBACK_URL
+                : getWebLoginCallbackUrl(window.location.origin));
+            const loginUrl = getExternalLoginUrl(resolvedCallbackUrl);
 
-          if (isDesktopHost) {
-            window.open(loginUrl, '_blank', 'noopener,noreferrer');
-            return;
+            if (isDesktopHost) {
+              window.open(loginUrl, '_blank', 'noopener,noreferrer');
+              return;
+            }
+
+            window.location.assign(loginUrl);
+          }}
+          size="lg"
+          variant={
+            isDesktopHost && clerkHandoffAvailable() ? 'outline' : 'primary'
           }
-
-          window.location.assign(loginUrl);
-        }}
-        size="lg"
-        variant="primary"
-        className="w-full rounded-full"
-      >
-        <span className="flex-1">{t('layout.log-in')}</span>
-      </Button>
+          buttonRadius="full"
+          className="w-full"
+        >
+          <span className="flex-1">{t('layout.log-in')}</span>
+        </Button>
+      </div>
     </div>
   );
 

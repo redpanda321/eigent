@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "المتابعة باستخدام myworld.ai",
+  "clerk-account-not-linked": "اربط حساب Eigent الحالي من الإعدادات أولاً.",
   "report-bug": "الإبلاغ عن خطأ",
   "report-bug-dialog-title": "الإبلاغ عن خلل",
   "report-bug-footer-hint": "سنحفظ ملف ZIP من سجلات التطبيق، ثم نفتح تطبيق البريد الإلكتروني. أرفق ملف ZIP المحفوظ بالرسالة قبل إرسالها.",

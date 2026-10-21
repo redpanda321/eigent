@@ -11,6 +11,7 @@ import re
 from urllib.parse import urlsplit
 
 import jwt
+import requests
 
 from app.core.environment import env
 
@@ -20,6 +21,10 @@ class ClerkNotConfigured(Exception):
 
 
 class ClerkSessionInvalid(Exception):
+    pass
+
+
+class ClerkHandoffUnavailable(Exception):
     pass
 
 
@@ -59,3 +64,30 @@ def verified_subject(token: str) -> str:
                         env("EIGENT_CLERK_ALLOWED_ORIGINS", "").split(",") if origin.strip())
     return verify_clerk_session(token, issuer=issuer, public_key=public_key,
                                 allowed_origins=allowed)
+
+
+def redeemed_subject(code: str, verifier: str) -> str:
+    """Redeem a one-time code through the fixed staging origin, then verify its JWT locally."""
+    origin = env("EIGENT_CLERK_HANDOFF_ORIGIN", "")
+    parsed = urlsplit(origin)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.path or parsed.query or parsed.fragment
+            or parsed.netloc != parsed.hostname):
+        raise ClerkNotConfigured("Clerk handoff origin is not configured")
+    if (not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9_-]{22,128}", code)
+            or not isinstance(verifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", verifier)):
+        raise ClerkSessionInvalid("invalid Clerk handoff")
+    try:
+        response = requests.post(
+            origin + "/api/eigent/redeem", json={"code": code, "verifier": verifier},
+            timeout=5, allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise ClerkHandoffUnavailable("Clerk handoff unavailable") from exc
+    if response.status_code != 200:
+        raise ClerkSessionInvalid("invalid or expired Clerk handoff")
+    try:
+        token = response.json()["session_token"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ClerkHandoffUnavailable("invalid Clerk handoff response") from exc
+    return verified_subject(token)

@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "Continuar con myworld.ai",
+  "clerk-account-not-linked": "Primero conecta tu cuenta existente de Eigent en Configuración.",
   "report-bug": "Informar un bug",
   "report-bug-dialog-title": "Informar de un error",
   "report-bug-footer-hint": "Guardaremos un ZIP con los registros de la aplicación y abriremos tu aplicación de correo. Adjunta el ZIP guardado al mensaje antes de enviarlo.",

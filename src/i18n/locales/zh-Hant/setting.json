@@ -1,4 +1,6 @@
 {
+  "connect-myworld": "連結 myworld.ai",
+  "clerk-connected": "已連結 myworld.ai 帳戶",
   "model-list": {
     "all-providers": "所有模型提供商",
     "default-model": "預設模型",

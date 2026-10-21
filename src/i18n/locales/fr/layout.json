@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "Continuer avec myworld.ai",
+  "clerk-account-not-linked": "Connectez d’abord votre compte Eigent existant dans les paramètres.",
   "report-bug": "Signaler un bug",
   "report-bug-dialog-title": "Signaler un bug",
   "report-bug-footer-hint": "Nous allons enregistrer un fichier ZIP contenant les journaux de l’application, puis ouvrir votre messagerie. Joignez le fichier ZIP enregistré au message avant de l’envoyer.",

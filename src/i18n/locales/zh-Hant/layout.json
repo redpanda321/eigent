@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "使用 myworld.ai 繼續",
+  "clerk-account-not-linked": "請先在設定中連結現有 Eigent 帳戶。",
   "report-bug": "報告 bug",
   "report-bug-dialog-title": "報告 bug",
   "report-bug-footer-hint": "我們會將應用記錄打包為 ZIP 並打開您的電子電子郵件客戶端。發送前請將該 ZIP 作為附件。",

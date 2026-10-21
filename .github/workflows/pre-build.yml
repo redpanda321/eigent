@@ -18,6 +18,9 @@ on:
 permissions:
   contents: write
 
+env:
+  VITE_CLERK_HANDOFF_ORIGIN: ${{ vars.VITE_CLERK_HANDOFF_ORIGIN }}
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

@@ -1,4 +1,6 @@
 {
+  "sign-in-with-myworld": "Continua con myworld.ai",
+  "clerk-account-not-linked": "Collega prima il tuo account Eigent esistente nelle impostazioni.",
   "report-bug": "Segnala un bug",
   "report-bug-dialog-title": "Seleziona un bug",
   "report-bug-footer-hint": "Salveremo una ZIP delle log di app, poi apriremo il tuo'applicazione email. Attaccare la ZIP salvata al messaggio prima di inviarlo.",

@@ -33,8 +33,10 @@ from app.shared.auth.token_blacklist import blacklist_token
 from app.shared.auth.user_auth import decode_refresh_token
 from app.shared.auth.user_auth import V1UserAuth, auth_must
 from app.domains.user.service.clerk_session import (
+    ClerkHandoffUnavailable,
     ClerkNotConfigured,
     ClerkSessionInvalid,
+    redeemed_subject,
     verified_subject,
 )
 from app.shared.exception import TokenException, UserException
@@ -47,20 +49,27 @@ class ClerkSessionIn(BaseModel):
     session_token: str = Field(min_length=1, max_length=8192)
 
 
-def _clerk_subject(token: str) -> str:
+class ClerkHandoffIn(BaseModel):
+    code: str = Field(min_length=22, max_length=128)
+    verifier: str = Field(min_length=43, max_length=128)
+
+
+def _resolve_clerk(call, *args) -> str:
     try:
-        return verified_subject(token)
+        return call(*args)
     except ClerkNotConfigured:
         raise HTTPException(status_code=503, detail="Clerk login is not configured") from None
+    except ClerkHandoffUnavailable:
+        raise HTTPException(status_code=503, detail="Clerk handoff is unavailable") from None
     except ClerkSessionInvalid:
         raise HTTPException(status_code=401, detail="Invalid Clerk session") from None
 
 
-@router.post("/clerk/link", name="link Clerk sign-in to current account", dependencies=[login_rate_limiter])
-def link_clerk_account(data: ClerkSessionIn, db_session: Session = Depends(session),
-                       auth: V1UserAuth = Depends(auth_must)) -> dict:
-    """Require both the existing Eigent session and a Clerk session to link."""
-    subject = _clerk_subject(data.session_token)
+def _clerk_subject(token: str) -> str:
+    return _resolve_clerk(verified_subject, token)
+
+
+def _link_clerk_subject(subject: str, db_session: Session, auth: V1UserAuth) -> dict:
     user = auth.user
     if user.status == Status.Block or user.deleted_at is not None:
         raise HTTPException(status_code=403, detail="Account is unavailable")
@@ -80,14 +89,35 @@ def link_clerk_account(data: ClerkSessionIn, db_session: Session = Depends(sessi
     return {"linked": True, "user_id": user.id}
 
 
-@router.post("/clerk/login", name="login with linked Clerk session", dependencies=[login_rate_limiter])
-def login_with_clerk(data: ClerkSessionIn, db_session: Session = Depends(session)) -> LoginResponse:
-    """Issue the existing Eigent token for an explicitly linked Clerk user."""
-    subject = _clerk_subject(data.session_token)
+def _login_clerk_subject(subject: str, db_session: Session) -> LoginResponse:
     user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
     if user is None or user.status == Status.Block or user.deleted_at is not None:
         raise HTTPException(status_code=403, detail="Clerk account is not linked or available")
     return LoginResponse(token=create_access_token(user.id), email=user.email, user_id=user.id)
+
+
+@router.post("/clerk/link", name="link Clerk sign-in to current account", dependencies=[login_rate_limiter])
+def link_clerk_account(data: ClerkSessionIn, db_session: Session = Depends(session),
+                       auth: V1UserAuth = Depends(auth_must)) -> dict:
+    """Require both the existing Eigent session and a Clerk session to link."""
+    return _link_clerk_subject(_clerk_subject(data.session_token), db_session, auth)
+
+
+@router.post("/clerk/login", name="login with linked Clerk session", dependencies=[login_rate_limiter])
+def login_with_clerk(data: ClerkSessionIn, db_session: Session = Depends(session)) -> LoginResponse:
+    """Issue the existing Eigent token for an explicitly linked Clerk user."""
+    return _login_clerk_subject(_clerk_subject(data.session_token), db_session)
+
+
+@router.post("/clerk/redeem-link", name="link account with Clerk handoff", dependencies=[login_rate_limiter])
+def link_clerk_handoff(data: ClerkHandoffIn, db_session: Session = Depends(session),
+                       auth: V1UserAuth = Depends(auth_must)) -> dict:
+    return _link_clerk_subject(_resolve_clerk(redeemed_subject, data.code, data.verifier), db_session, auth)
+
+
+@router.post("/clerk/redeem-login", name="login with Clerk handoff", dependencies=[login_rate_limiter])
+def login_clerk_handoff(data: ClerkHandoffIn, db_session: Session = Depends(session)) -> LoginResponse:
+    return _login_clerk_subject(_resolve_clerk(redeemed_subject, data.code, data.verifier), db_session)
 
 
 @router.post("/dev_login", name="dev login (Swagger only)", include_in_schema=True)
