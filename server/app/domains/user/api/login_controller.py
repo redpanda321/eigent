@@ -19,8 +19,9 @@ import time
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi_babel import _
 from loguru import logger
-from pydantic import BaseModel
-from sqlmodel import Session
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
 
 from app.core import code
 from app.core.database import session
@@ -30,10 +31,63 @@ from app.model.user.user import LoginByPasswordIn, LoginResponse, Status, User
 from app.shared.auth import create_access_token, create_refresh_token
 from app.shared.auth.token_blacklist import blacklist_token
 from app.shared.auth.user_auth import decode_refresh_token
+from app.shared.auth.user_auth import V1UserAuth, auth_must
+from app.domains.user.service.clerk_session import (
+    ClerkNotConfigured,
+    ClerkSessionInvalid,
+    verified_subject,
+)
 from app.shared.exception import TokenException, UserException
 from app.shared.middleware.rate_limit import login_rate_limiter
 
 router = APIRouter(prefix="/user", tags=["V1 Login"])
+
+
+class ClerkSessionIn(BaseModel):
+    session_token: str = Field(min_length=1, max_length=8192)
+
+
+def _clerk_subject(token: str) -> str:
+    try:
+        return verified_subject(token)
+    except ClerkNotConfigured:
+        raise HTTPException(status_code=503, detail="Clerk login is not configured") from None
+    except ClerkSessionInvalid:
+        raise HTTPException(status_code=401, detail="Invalid Clerk session") from None
+
+
+@router.post("/clerk/link", name="link Clerk sign-in to current account", dependencies=[login_rate_limiter])
+def link_clerk_account(data: ClerkSessionIn, db_session: Session = Depends(session),
+                       auth: V1UserAuth = Depends(auth_must)) -> dict:
+    """Require both the existing Eigent session and a Clerk session to link."""
+    subject = _clerk_subject(data.session_token)
+    user = auth.user
+    if user.status == Status.Block or user.deleted_at is not None:
+        raise HTTPException(status_code=403, detail="Account is unavailable")
+    if user.clerk_id not in (None, subject):
+        raise HTTPException(status_code=409, detail="Account is already linked to another Clerk user")
+    linked = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+    if linked is not None and linked.id != user.id:
+        raise HTTPException(status_code=409, detail="Clerk user is already linked to another account")
+    if user.clerk_id is None:
+        user.clerk_id = subject
+        db_session.add(user)
+        try:
+            db_session.commit()
+        except IntegrityError:
+            db_session.rollback()
+            raise HTTPException(status_code=409, detail="Clerk user is already linked") from None
+    return {"linked": True, "user_id": user.id}
+
+
+@router.post("/clerk/login", name="login with linked Clerk session", dependencies=[login_rate_limiter])
+def login_with_clerk(data: ClerkSessionIn, db_session: Session = Depends(session)) -> LoginResponse:
+    """Issue the existing Eigent token for an explicitly linked Clerk user."""
+    subject = _clerk_subject(data.session_token)
+    user = db_session.exec(select(User).where(User.clerk_id == subject)).one_or_none()
+    if user is None or user.status == Status.Block or user.deleted_at is not None:
+        raise HTTPException(status_code=403, detail="Clerk account is not linked or available")
+    return LoginResponse(token=create_access_token(user.id), email=user.email, user_id=user.id)
 
 
 @router.post("/dev_login", name="dev login (Swagger only)", include_in_schema=True)
@@ -92,8 +146,8 @@ async def by_password(data: LoginByPasswordIn, db_session: Session = Depends(ses
         raise UserException(code.password, _("Account or password error"))
     if user.status == Status.Block:
         raise UserException(code.error, _("Your account has been blocked."))
-    if not user.is_active:
-        raise UserException(code.error, _("Please activate your account via the email link."))
+    if user.deleted_at is not None:
+        raise UserException(code.error, _("Account is unavailable."))
 
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
@@ -116,8 +170,8 @@ async def refresh(data: RefreshTokenIn, db_session: Session = Depends(session)) 
         raise TokenException(code.token_invalid, _("User not found"))
     if user.status == Status.Block:
         raise UserException(code.error, _("Your account has been blocked."))
-    if not user.is_active:
-        raise UserException(code.error, _("Please activate your account via the email link."))
+    if user.deleted_at is not None:
+        raise UserException(code.error, _("Account is unavailable."))
     if jti:
         ttl = max(0, exp_ts - int(time.time()))
         await blacklist_token(jti, ttl)

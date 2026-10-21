@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
-from .key_service import KeyService
 from .user_auth_service import UserAuthService
 
-__all__ = ["KeyService", "UserAuthService"]
+__all__ = ["UserAuthService"]

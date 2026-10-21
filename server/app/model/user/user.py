@@ -32,6 +32,7 @@ class Status(IntEnum):
 class User(AbstractModel, DefaultTimes, table=True):
     id: int = Field(default=None, primary_key=True)
     stack_id: str | None = Field(default=None, unique=True, max_length=255)
+    clerk_id: str | None = Field(default=None, index=True, unique=True, max_length=255)
     username: str | None = Field(default=None, unique=True, max_length=128)
     email: EmailStr = Field(unique=True, max_length=128)
     password: str | None = Field(default=None, max_length=256)
