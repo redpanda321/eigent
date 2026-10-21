@@ -27,8 +27,13 @@ import {
 } from './githubReleaseCdnProvider';
 
 const { autoUpdater } = createRequire(import.meta.url)('electron-updater');
+const updatesDisabled = import.meta.env.VITE_EIGENT_DISABLE_UPDATES === 'true';
 
 export function update(win: Electron.BrowserWindow) {
+  if (updatesDisabled) {
+    console.log('[AutoUpdater] Disabled for this build');
+    return;
+  }
   // When set to false, the update download will be triggered through the API
   autoUpdater.verifyUpdateCodeSignature = false;
   autoUpdater.autoDownload = false;
@@ -119,6 +124,12 @@ export function update(win: Electron.BrowserWindow) {
  * Should be called once when the app starts
  */
 export function registerUpdateIpcHandlers(beforeQuitAndInstall?: () => void) {
+  if (updatesDisabled) {
+    ipcMain.handle('check-update', async () => null);
+    ipcMain.handle('start-download', async () => false);
+    ipcMain.handle('quit-and-install', async () => false);
+    return;
+  }
   // Checking for updates - errors are silent since users can't act on them
   ipcMain.handle('check-update', async () => {
     try {
